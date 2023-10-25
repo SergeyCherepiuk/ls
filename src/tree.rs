@@ -1,57 +1,43 @@
-use std::fs;
+use std::{fs, io};
 
 const INDENT_SYMBOL: &str = "\t";
 const DIR_SIGN: &str = "[D]";
 const FILE_SIGN: &str = "[F]";
 const RO_SIGN: &str = "(ro)";
 const RW_SIGN: &str = "(rw)";
-const UNKNOWN_SIGN: &str = "(unknown)";
 
-pub fn list_dir(dir: &str, indent_depth: usize) {
-    let dir = dir.trim_end_matches('/');
-
-    if !fs::metadata(dir).is_ok_and(|metadata| metadata.is_dir()) {
-        return;
-    }
-
+pub fn list_dir(dir: &str, indent_depth: usize) -> io::Result<()> {
     let dir_indent = INDENT_SYMBOL.repeat(indent_depth);
     let file_indent = format!("{dir_indent}{INDENT_SYMBOL}");
 
+    let dir = dir.trim_end_matches('/');
+    if !fs::metadata(dir)?.is_dir() {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+
     println!("{dir_indent}{DIR_SIGN} {dir}:");
 
-    let read_dir = match fs::read_dir(dir) {
-        Ok(read_dir) => read_dir,
-        Err(_) => return,
-    };
+    let read_dir = fs::read_dir(dir)?;
+    for dir_entry in read_dir {
+        let (file_name, metadata) = dir_entry.map(|dir_entry| {
+            dir_entry
+                .metadata()
+                .map(|metadata| (dir_entry.file_name(), metadata))
+        })??; // Masterpiece
 
-    for dir_entry_or_err in read_dir {
-        let dir_entry = match dir_entry_or_err {
-            Ok(dir_entry) => dir_entry,
-            Err(_) => continue,
-        };
-
-        let file_name = dir_entry.file_name();
-        let file_name = match file_name.to_str() {
-            Some(file_name) => file_name,
-            None => continue,
-        };
-
-        let metadata = dir_entry.metadata();
-        if (&metadata.as_ref()).is_ok_and(|metadata| metadata.is_dir()) {
+        let file_name = file_name.to_str().unwrap_or_default();
+        if metadata.is_dir() {
             let dir_path = format!("{dir}/{file_name}");
-            list_dir(dir_path.as_str(), indent_depth + 1);
+            list_dir(dir_path.as_str(), indent_depth + 1)?;
         } else {
-            let permissions = match metadata {
-                Ok(metadata) => {
-                    if metadata.permissions().readonly() {
-                        RO_SIGN
-                    } else {
-                        RW_SIGN
-                    }
-                }
-                Err(_) => UNKNOWN_SIGN,
+            let permissions = if metadata.permissions().readonly() {
+                RO_SIGN
+            } else {
+                RW_SIGN
             };
             println!("{file_indent}{FILE_SIGN} {permissions} {file_name}");
         }
     }
+
+    Ok(())
 }
